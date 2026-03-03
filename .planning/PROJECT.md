@@ -60,7 +60,7 @@ When external tools modify vault files, the user can immediately see exactly wha
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Patience diff algorithm | Better alignment on code-like content than Myers diff | ✓ Good |
+| Patience diff algorithm | Better alignment for markdown/text content than Myers diff | ✓ Good |
 | CodeMirror MergeView for diff UI | Matches VS Code UX, Obsidian already ships CM6 | ✓ Good |
 | Custom fold system over CM6 built-in | Needed per-region expand/collapse with sync across both editors | ✓ Good |
 | Test hardening before new features | Existing functionality needs verification before building on top | — Pending |
