@@ -7,13 +7,13 @@
 
 ### Testing & Correctness
 
-- [ ] **TEST-01**: E2e tests confirm accept-all applies new content correctly (not reversed)
+- [x] **TEST-01**: E2e tests confirm accept-all applies new content correctly (not reversed)
 - [ ] **TEST-02**: E2e tests confirm per-chunk accept and per-chunk reject work via revert controls
-- [ ] **TEST-03**: E2e tests confirm external change detection opens diff view automatically
-- [ ] **TEST-04**: E2e tests confirm fold/expand of unchanged regions syncs across both sides of the diff
-- [ ] **TEST-05**: E2e tests confirm accumulated diffs (multiple external edits to same file) resolve correctly
-- [ ] **TEST-06**: Commit the DiffView.ts side-swap fix with passing tests
-- [ ] **TEST-07**: E2e tests confirm reject-all restores original content correctly
+- [x] **TEST-03**: E2e tests confirm external change detection opens diff view automatically
+- [x] **TEST-04**: E2e tests confirm fold/expand of unchanged regions syncs across both sides of the diff
+- [x] **TEST-05**: E2e tests confirm accumulated diffs (multiple external edits to same file) resolve correctly
+- [x] **TEST-06**: Commit the DiffView.ts side-swap fix with passing tests
+- [x] **TEST-07**: E2e tests confirm reject-all restores original content correctly
 
 ### Persistence
 
@@ -58,13 +58,13 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TEST-01 | Phase 1 | Pending |
+| TEST-01 | Phase 1 | Complete |
 | TEST-02 | Phase 1 | Pending |
-| TEST-03 | Phase 1 | Pending |
-| TEST-04 | Phase 1 | Pending |
-| TEST-05 | Phase 1 | Pending |
-| TEST-06 | Phase 1 | Pending |
-| TEST-07 | Phase 1 | Pending |
+| TEST-03 | Phase 1 | Complete |
+| TEST-04 | Phase 1 | Complete |
+| TEST-05 | Phase 1 | Complete |
+| TEST-06 | Phase 1 | Complete |
+| TEST-07 | Phase 1 | Complete |
 | PERS-01 | Phase 4 | Pending |
 | PERS-02 | Phase 4 | Pending |
 | PERS-03 | Phase 4 | Pending |
