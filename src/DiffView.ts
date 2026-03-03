@@ -157,14 +157,14 @@ export class DiffView extends ItemView {
 
 		section.mergeView = new MergeView({
 			a: {
-				doc: section.diff.oldContent,
+				doc: section.diff.newContent,
 				extensions: [
 					...foldUnchangedExtension(syncA),
 					lineNumbers(),
 				],
 			},
 			b: {
-				doc: section.diff.newContent,
+				doc: section.diff.oldContent,
 				extensions: [
 					...foldUnchangedExtension(syncB),
 					lineNumbers(),
@@ -178,7 +178,7 @@ export class DiffView extends ItemView {
 				const btn = document.createElement("button");
 				btn.className = "diff-view-revert-btn";
 				btn.textContent = "←";
-				btn.title = "Apply this change";
+				btn.title = "Revert this change";
 				return btn;
 			},
 			highlightChanges: true,
