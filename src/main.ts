@@ -152,6 +152,14 @@ export default class ExternalDiffPlugin extends Plugin {
 				}
 				this.fileWatcher.updateSnapshot(path, oldContent);
 			},
+			onWrite: (content: string) => {
+				this.fileWatcher.updateSnapshot(path, content);
+				const file = this.app.vault.getAbstractFileByPath(path);
+				if (file) {
+					this.fileWatcher.markAsInternalEdit(path);
+					this.app.vault.modify(file as any, content);
+				}
+			},
 		};
 	}
 

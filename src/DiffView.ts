@@ -48,6 +48,7 @@ export interface PendingDiff {
 	newContent: string;
 	onAccept: (content: string) => void;
 	onReject: () => void;
+	onWrite: (content: string) => void;
 }
 
 interface FileSection {
@@ -134,13 +135,13 @@ export class DiffView extends ItemView {
 			if (section.expanded) {
 				const mergeContainer = block.createDiv({cls: "diff-view-merge cm-s-obsidian mod-cm6"});
 				section.mergeContainer = mergeContainer;
-				this.createMergeView(section);
+				this.createMergeView(path, section);
 			}
 		}
 	}
 
 	/** Create (or recreate) the MergeView for a section. */
-	private createMergeView(section: FileSection): void {
+	private createMergeView(path: string, section: FileSection): void {
 		if (section.mergeView) {
 			section.mergeView.destroy();
 			section.mergeView = null;
@@ -157,23 +158,23 @@ export class DiffView extends ItemView {
 
 		section.mergeView = new MergeView({
 			a: {
-				doc: section.diff.newContent,
-				extensions: [
-					...foldUnchangedExtension(syncA),
-					lineNumbers(),
-				],
-			},
-			b: {
 				doc: section.diff.oldContent,
 				extensions: [
-					...foldUnchangedExtension(syncB),
+					...foldUnchangedExtension(syncA),
 					lineNumbers(),
 					EditorView.editable.of(false),
 					EditorState.readOnly.of(true),
 				],
 			},
+			b: {
+				doc: section.diff.newContent,
+				extensions: [
+					...foldUnchangedExtension(syncB),
+					lineNumbers(),
+					],
+			},
 			parent: section.mergeContainer,
-			revertControls: "b-to-a",
+			revertControls: "a-to-b",
 			renderRevertControl: () => {
 				const btn = document.createElement("button");
 				btn.className = "diff-view-revert-btn";
@@ -192,6 +193,22 @@ export class DiffView extends ItemView {
 		const rangesB = computeUnchangedRanges(section.mergeView.b.state.doc, chunks, "b", 2, 4);
 		section.mergeView.a.dispatch({effects: setFoldRanges.of(rangesA)});
 		section.mergeView.b.dispatch({effects: setFoldRanges.of(rangesB)});
+
+		// Write to disk on per-chunk revert. CM6 handles revert via mousedown on .cm-merge-revert container.
+		const revertContainer = section.mergeContainer?.querySelector(".cm-merge-revert");
+		if (revertContainer) {
+			revertContainer.addEventListener("mousedown", () => {
+				setTimeout(() => {
+					if (!section.mergeView) return;
+					const content = section.mergeView.b.state.doc.toString();
+					section.diff.onWrite(content);
+					section.diff.newContent = content;
+					if (content === section.diff.oldContent) {
+						this.removeFile(path);
+					}
+				}, 50);
+			});
+		}
 	}
 
 	/** Accept current state of editor A (includes any partial chunk reverts). */
@@ -199,7 +216,7 @@ export class DiffView extends ItemView {
 		const section = this.sections.get(path);
 		if (!section) return;
 		const content = section.mergeView
-			? section.mergeView.a.state.doc.toString()
+			? section.mergeView.b.state.doc.toString()
 			: section.diff.newContent;
 		section.diff.onAccept(content);
 		this.removeFile(path);
