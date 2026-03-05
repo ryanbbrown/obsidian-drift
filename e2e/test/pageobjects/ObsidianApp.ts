@@ -177,6 +177,17 @@ class ObsidianApp {
     });
   }
 
+  /** Reloads the plugin by disabling and re-enabling it. */
+  async reloadPlugin() {
+    await browser.execute(async (pluginId: string) => {
+      // @ts-expect-error 'app' exists in Obsidian
+      declare const app: App;
+      await app.plugins.disablePlugin(pluginId);
+      await app.plugins.enablePlugin(pluginId);
+    }, PLUGIN_ID);
+    await browser.pause(2000);
+  }
+
   /** Closes diff view tabs without clearing pending diffs (for reopen testing). */
   async closeDiffTabsOnly() {
     await browser.execute(() => {

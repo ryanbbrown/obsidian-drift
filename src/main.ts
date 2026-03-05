@@ -122,6 +122,15 @@ export default class ExternalDiffPlugin extends Plugin {
 			if (this.restoredDiffs.length > 0) {
 				await this.restorePendingDiffs(this.restoredDiffs);
 				this.restoredDiffs = [];
+				// Obsidian preserves workspace leaves across plugin reload, so the diff
+				// tab may already exist but be empty (new DiffView instance, no sections).
+				// Repopulate it with the restored diffs.
+				const existing = this.getExistingDiffView();
+				if (existing && (existing as any).sections.size === 0) {
+					for (const [path, diff] of this.pendingDiffs) {
+						existing.addFile(path, diff);
+					}
+				}
 			}
 		});
 	}
