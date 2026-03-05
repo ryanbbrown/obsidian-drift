@@ -105,6 +105,55 @@ class ObsidianApp {
     await browser.pause(1000);
   }
 
+  /** Dispatches a CM6 transaction to replace content, simulating a user edit (triggers detection). */
+  async editAsUser(filePath: string, newContent: string) {
+    await browser.execute((path: string, text: string) => {
+      // @ts-expect-error 'app' exists in Obsidian
+      declare const app: App;
+      const leaf = app.workspace.getLeavesOfType("markdown").find(
+        (l: any) => l.view.file?.path === path
+      );
+      if (!leaf) throw new Error(`No leaf found for ${path}`);
+      const cm = (leaf.view as any).editor.cm;
+      cm.dispatch({changes: {from: 0, to: cm.state.doc.length, insert: text}});
+    }, filePath, newContent);
+    await browser.pause(500);
+  }
+
+  /** Focuses the editor leaf for a given file path. */
+  async focusNote(filePath: string) {
+    await browser.execute((path: string) => {
+      // @ts-expect-error 'app' exists in Obsidian
+      declare const app: App;
+      const leaf = app.workspace.getLeavesOfType("markdown").find(
+        (l: any) => l.view.file?.path === path
+      );
+      if (leaf) app.workspace.setActiveLeaf(leaf, {focus: true});
+    }, filePath);
+    await browser.pause(500);
+  }
+
+  /** Waits for a modal with the given CSS class, then clicks a button by text. */
+  async clickModalButton(modalClass: string, buttonText: string) {
+    const modal = $(`.${modalClass}`);
+    await modal.waitForExist({timeout: 5000});
+    await browser.execute((cls: string, text: string) => {
+      const el = document.querySelector(`.${cls}`);
+      if (!el) throw new Error(`Modal .${cls} not found`);
+      const buttons = el.querySelectorAll("button");
+      for (const btn of buttons) {
+        if (btn.textContent?.trim() === text) { btn.click(); return; }
+      }
+      throw new Error(`Button "${text}" not found in .${cls}`);
+    }, modalClass, buttonText);
+    await browser.pause(500);
+  }
+
+  /** Checks if a modal with the given CSS class is currently visible. */
+  async isModalVisible(modalClass: string): Promise<boolean> {
+    return $(`.${modalClass}`).isExisting();
+  }
+
   /** Writes content directly to a file in the test vault, bypassing Obsidian's editor. */
   async modifyFileExternally(filePath: string, content: string) {
     const fullPath = path.join(TEST_VAULT_DIR, filePath);

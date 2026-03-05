@@ -1,6 +1,6 @@
 import {App, Editor, MarkdownView, Modal, Plugin, Setting, TAbstractFile, TFile} from "obsidian";
 import {EditorView, ViewUpdate} from "@codemirror/view";
-import {Transaction, Extension} from "@codemirror/state";
+import {EditorState, Transaction, Extension} from "@codemirror/state";
 import {DEFAULT_SETTINGS, ExternalDiffSettings, ExternalDiffSettingTab} from "./settings";
 import {DiffView, DIFF_VIEW_TYPE, PendingDiff} from "./DiffView";
 
@@ -20,6 +20,7 @@ export default class ExternalDiffPlugin extends Plugin {
 	private pendingDiffs = new Map<string, PendingDiff>();
 	private baselines = new Map<string, string>();
 	private selfModifyPaths = new Set<string>();
+	private pendingEditWarning = new Set<string>();
 	private restoredDiffs: PersistedDiffEntry[] = [];
 	private saveTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -205,44 +206,62 @@ export default class ExternalDiffPlugin extends Plugin {
 
 	/** Create the CM6 extension that detects external changes via transaction annotations. */
 	private createDetectionExtension(): Extension {
-		return EditorView.updateListener.of((update: ViewUpdate) => {
-			if (!update.docChanged) return;
-			if (!this.settings.enabled) return;
+		return [
+			// Block user edits on files with pending diffs and show a warning modal
+			EditorState.transactionFilter.of((tr) => {
+				if (!tr.docChanged) return tr;
+				if (!this.settings.enabled) return tr;
+				if (tr.annotation(Transaction.userEvent) === "set") return tr;
 
-			const path = this.getPathForEditorView(update.view);
-			if (!path) return;
+				const path = this.getPathForEditorState(tr.startState);
+				if (!path || !this.pendingDiffs.has(path)) return tr;
+				if (this.pendingEditWarning.has(path)) return [];
 
-			// Check if this is our own vault.modify
-			if (this.selfModifyPaths.has(path)) {
-				this.selfModifyPaths.delete(path);
-				this.baselines.set(path, update.state.doc.toString());
-				return;
-			}
-
-			// Obsidian uses userEvent "set" exclusively when syncing external file
-			// content into the editor. Detect that specific signal rather than
-			// whitelisting all user events — Obsidian dispatches some user actions
-			// (e.g. paste) without standard CM6 userEvent annotations.
-			const isExternalSync = update.transactions.some(tr =>
-				tr.annotation(Transaction.userEvent) === "set"
-			);
-
-			if (isExternalSync) {
-				const newContent = update.state.doc.toString();
-				const oldContent = this.baselines.get(path);
-				if (oldContent !== undefined && oldContent !== newContent) {
-					this.handleExternalChange(path, oldContent, newContent);
-				}
-			} else {
-				this.baselines.set(path, update.state.doc.toString());
-				// User editing a file with a pending diff implicitly resolves it
-				if (this.pendingDiffs.has(path)) {
+				this.pendingEditWarning.add(path);
+				new EditWarningModal(this.app, () => {
+					this.pendingEditWarning.delete(path);
 					this.pendingDiffs.delete(path);
 					this.getExistingDiffView()?.removeFile(path);
 					this.persistState();
+				}, () => {
+					this.pendingEditWarning.delete(path);
+				}).open();
+				return [];
+			}),
+
+			EditorView.updateListener.of((update: ViewUpdate) => {
+				if (!update.docChanged) return;
+				if (!this.settings.enabled) return;
+
+				const path = this.getPathForEditorView(update.view);
+				if (!path) return;
+
+				// Check if this is our own vault.modify
+				if (this.selfModifyPaths.has(path)) {
+					this.selfModifyPaths.delete(path);
+					this.baselines.set(path, update.state.doc.toString());
+					return;
 				}
-			}
-		});
+
+				// Obsidian uses userEvent "set" exclusively when syncing external file
+				// content into the editor. Detect that specific signal rather than
+				// whitelisting all user events — Obsidian dispatches some user actions
+				// (e.g. paste) without standard CM6 userEvent annotations.
+				const isExternalSync = update.transactions.some(tr =>
+					tr.annotation(Transaction.userEvent) === "set"
+				);
+
+				if (isExternalSync) {
+					const newContent = update.state.doc.toString();
+					const oldContent = this.baselines.get(path);
+					if (oldContent !== undefined && oldContent !== newContent) {
+						this.handleExternalChange(path, oldContent, newContent);
+					}
+				} else {
+					this.baselines.set(path, update.state.doc.toString());
+				}
+			}),
+		];
 	}
 
 	/** Resolve an EditorView to the file path it's editing. */
@@ -250,6 +269,17 @@ export default class ExternalDiffPlugin extends Plugin {
 		for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
 			const mdView = leaf.view as MarkdownView;
 			if ((mdView as any).editor?.cm === view) {
+				return mdView.file?.path ?? null;
+			}
+		}
+		return null;
+	}
+
+	/** Resolve an EditorState to the file path (for transactionFilter which lacks view access). */
+	private getPathForEditorState(state: EditorState): string | null {
+		for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+			const mdView = leaf.view as MarkdownView;
+			if ((mdView as any).editor?.cm?.state === state) {
 				return mdView.file?.path ?? null;
 			}
 		}
@@ -413,6 +443,43 @@ class ConflictModal extends Modal {
 				this.onProceed();
 			}))
 			.addButton(btn => btn.setButtonText("Cancel").onClick(() => this.close()));
+	}
+}
+
+class EditWarningModal extends Modal {
+	private onProceed: () => void;
+	private onCancel: () => void;
+	private resolved = false;
+
+	constructor(app: App, onProceed: () => void, onCancel: () => void) {
+		super(app);
+		this.onProceed = onProceed;
+		this.onCancel = onCancel;
+	}
+
+	/** Render the warning with proceed/cancel buttons. */
+	onOpen(): void {
+		this.modalEl.addClass("diff-edit-warning-modal");
+		this.contentEl.createEl("h3", {text: "Pending external changes"});
+		this.contentEl.createEl("p", {
+			text: "Editing this file will accept all pending external changes. They will no longer be visible in the diff viewer.",
+		});
+		new Setting(this.contentEl)
+			.addButton(btn => btn.setButtonText("Proceed").setCta().onClick(() => {
+				this.resolved = true;
+				this.close();
+				this.onProceed();
+			}))
+			.addButton(btn => btn.setButtonText("Cancel").onClick(() => {
+				this.resolved = true;
+				this.close();
+				this.onCancel();
+			}));
+	}
+
+	/** Call cancel callback if modal was closed without clicking a button. */
+	onClose(): void {
+		if (!this.resolved) this.onCancel();
 	}
 }
 
