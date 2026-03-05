@@ -46,8 +46,8 @@ export const DIFF_VIEW_TYPE = "external-diff-view";
 export interface PendingDiff {
 	oldContent: string;
 	newContent: string;
-	onAccept: (content: string) => void;
-	onReject: () => void;
+	onAccept: (content: string) => void | Promise<void>;
+	onReject: () => void | Promise<void>;
 	onWrite: (content: string) => void;
 }
 

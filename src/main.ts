@@ -1,12 +1,25 @@
-import {Editor, MarkdownView, Modal, Plugin, Setting} from "obsidian";
+import {App, Editor, MarkdownView, Modal, Plugin, Setting, TFile} from "obsidian";
 import {DEFAULT_SETTINGS, ExternalDiffSettings, ExternalDiffSettingTab} from "./settings";
 import {FileWatcher} from "./FileWatcher";
 import {DiffView, DIFF_VIEW_TYPE, PendingDiff} from "./DiffView";
+
+interface PersistedDiffEntry {
+	path: string;
+	oldContent: string;
+	newContent: string;
+}
+
+interface PersistedData {
+	settings?: Partial<ExternalDiffSettings>;
+	pendingDiffs?: PersistedDiffEntry[];
+}
 
 export default class ExternalDiffPlugin extends Plugin {
 	settings: ExternalDiffSettings;
 	private fileWatcher: FileWatcher;
 	private pendingDiffs = new Map<string, PendingDiff>();
+	private restoredDiffs: PersistedDiffEntry[] = [];
+	private saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -89,19 +102,77 @@ export default class ExternalDiffPlugin extends Plugin {
 
 		this.addSettingTab(new ExternalDiffSettingTab(this.app, this));
 
-		this.app.workspace.onLayoutReady(() => this.fileWatcher.start());
+		this.app.workspace.onLayoutReady(async () => {
+			await this.fileWatcher.start();
+			if (this.restoredDiffs.length > 0) {
+				await this.restorePendingDiffs(this.restoredDiffs);
+				this.restoredDiffs = [];
+			}
+		});
 	}
 
 	onunload() {
+		if (this.saveTimer) {
+			clearTimeout(this.saveTimer);
+			this.saveTimer = null;
+		}
+		this.saveData({
+			settings: this.settings,
+			pendingDiffs: this.serializePendingDiffs(),
+		});
 		this.fileWatcher.destroy();
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<ExternalDiffSettings>);
+		const data: PersistedData = (await this.loadData()) ?? {};
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, data.settings ?? {});
+		this.restoredDiffs = data.pendingDiffs ?? [];
 	}
 
 	async saveSettings() {
-		await this.saveData(this.settings);
+		await this.saveData({
+			settings: this.settings,
+			pendingDiffs: this.serializePendingDiffs(),
+		});
+	}
+
+	/** Serialize pending diffs to a persistable format. */
+	private serializePendingDiffs(): PersistedDiffEntry[] {
+		return Array.from(this.pendingDiffs.entries()).map(([path, diff]) => ({
+			path,
+			oldContent: diff.oldContent,
+			newContent: diff.newContent,
+		}));
+	}
+
+	/** Schedule a debounced save of state to disk. */
+	private persistState(): void {
+		if (this.saveTimer) return;
+		this.saveTimer = setTimeout(async () => {
+			this.saveTimer = null;
+			await this.saveData({
+				settings: this.settings,
+				pendingDiffs: this.serializePendingDiffs(),
+			});
+		}, 5000);
+	}
+
+	/** Restore pending diffs from persisted data, discarding stale entries. */
+	private async restorePendingDiffs(entries: PersistedDiffEntry[]): Promise<void> {
+		for (const entry of entries) {
+			const file = this.app.vault.getAbstractFileByPath(entry.path);
+			if (!file) continue;
+
+			const currentContent = await this.app.vault.read(file as TFile);
+			if (currentContent === entry.oldContent) continue;
+
+			const diff = this.makeDiffCallbacks(entry.path, entry.oldContent, currentContent);
+			this.pendingDiffs.set(entry.path, diff);
+		}
+
+		if (this.pendingDiffs.size > 0) {
+			this.persistState();
+		}
 	}
 
 	/** Find the existing diff view, or null if none open. */
@@ -132,25 +203,31 @@ export default class ExternalDiffPlugin extends Plugin {
 		return {
 			oldContent,
 			newContent,
-			onAccept: (content: string) => {
-				this.pendingDiffs.delete(path);
-				this.fileWatcher.updateSnapshot(path, content);
-				if (content !== newContent) {
-					const file = this.app.vault.getAbstractFileByPath(path);
-					if (file) {
-						this.fileWatcher.markAsInternalEdit(path);
-						this.app.vault.modify(file as any, content);
-					}
-				}
-			},
-			onReject: () => {
-				this.pendingDiffs.delete(path);
+			onAccept: async (content: string) => {
 				const file = this.app.vault.getAbstractFileByPath(path);
 				if (file) {
-					this.fileWatcher.markAsInternalEdit(path);
-					this.app.vault.modify(file as any, oldContent);
+					const currentContent = await this.app.vault.read(file as TFile);
+					if (currentContent !== newContent) {
+						new ConflictModal(this.app, path, () => {
+							this.completeAccept(path, content, file as TFile);
+						}).open();
+						return;
+					}
 				}
-				this.fileWatcher.updateSnapshot(path, oldContent);
+				this.completeAccept(path, content, file as TFile);
+			},
+			onReject: async () => {
+				const file = this.app.vault.getAbstractFileByPath(path);
+				if (file) {
+					const currentContent = await this.app.vault.read(file as TFile);
+					if (currentContent !== newContent) {
+						new ConflictModal(this.app, path, () => {
+							this.completeReject(path, oldContent, file as TFile);
+						}).open();
+						return;
+					}
+				}
+				this.completeReject(path, oldContent, file as TFile);
 			},
 			onWrite: (content: string) => {
 				this.fileWatcher.updateSnapshot(path, content);
@@ -159,14 +236,34 @@ export default class ExternalDiffPlugin extends Plugin {
 					this.fileWatcher.markAsInternalEdit(path);
 					this.app.vault.modify(file as any, content);
 				}
+				this.persistState();
 			},
 		};
+	}
+
+	/** Complete the accept action after conflict check. */
+	private completeAccept(path: string, content: string, file: TFile): void {
+		this.pendingDiffs.delete(path);
+		this.fileWatcher.updateSnapshot(path, content);
+		this.fileWatcher.markAsInternalEdit(path);
+		this.app.vault.modify(file, content);
+		this.persistState();
+	}
+
+	/** Complete the reject action after conflict check. */
+	private completeReject(path: string, oldContent: string, file: TFile): void {
+		this.pendingDiffs.delete(path);
+		this.fileWatcher.markAsInternalEdit(path);
+		this.app.vault.modify(file, oldContent);
+		this.fileWatcher.updateSnapshot(path, oldContent);
+		this.persistState();
 	}
 
 	/** Handle an external file change — add to the single diff tab, opening it only if needed. */
 	private handleExternalChange(path: string, oldContent: string, newContent: string): void {
 		const diff = this.makeDiffCallbacks(path, oldContent, newContent);
 		this.pendingDiffs.set(path, diff);
+		this.persistState();
 
 		const existing = this.getExistingDiffView();
 		if (existing) {
@@ -175,6 +272,29 @@ export default class ExternalDiffPlugin extends Plugin {
 		}
 
 		this.openDiffTab().then(view => view.addFile(path, diff));
+	}
+}
+
+class ConflictModal extends Modal {
+	private onProceed: () => void;
+
+	constructor(app: App, path: string, onProceed: () => void) {
+		super(app);
+		this.onProceed = onProceed;
+	}
+
+	/** Render the conflict warning with proceed/cancel buttons. */
+	onOpen(): void {
+		this.contentEl.createEl("h3", {text: "File has changed"});
+		this.contentEl.createEl("p", {
+			text: "This file was modified since the diff was generated. Proceeding will overwrite those changes.",
+		});
+		new Setting(this.contentEl)
+			.addButton(btn => btn.setButtonText("Proceed").setCta().onClick(() => {
+				this.close();
+				this.onProceed();
+			}))
+			.addButton(btn => btn.setButtonText("Cancel").onClick(() => this.close()));
 	}
 }
 
