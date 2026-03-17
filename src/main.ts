@@ -1,4 +1,4 @@
-import {App, Editor, MarkdownView, Modal, Plugin, Setting, TAbstractFile, TFile} from "obsidian";
+import {App, MarkdownView, Modal, Plugin, Setting, TAbstractFile, TFile} from "obsidian";
 import {EditorView, ViewUpdate} from "@codemirror/view";
 import {EditorState, Transaction, Extension} from "@codemirror/state";
 import {DEFAULT_SETTINGS, ExternalDiffSettings, ExternalDiffSettingTab} from "./settings";
@@ -67,48 +67,6 @@ export default class ExternalDiffPlugin extends Plugin {
 			id: "open-diff-viewer",
 			name: "Open diff viewer",
 			callback: () => this.openDiffTab(),
-		});
-
-		this.addCommand({
-			id: "test-simulate-insert",
-			name: "Test: Simulate external insert",
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				if (!view.file) return;
-				new TextInputModal(this.app, "Text to insert", (text) => {
-					if (!view.file) return;
-					const oldContent = editor.getValue();
-					const line = editor.getCursor().line;
-					const lines = oldContent.split("\n");
-					lines.splice(line + 1, 0, text);
-					const newContent = lines.join("\n");
-					this.selfModifyPaths.add(view.file.path);
-					this.app.vault.modify(view.file, newContent);
-					this.handleExternalChange(view.file.path, oldContent, newContent);
-				}).open();
-			},
-		});
-
-		this.addCommand({
-			id: "test-simulate-delete",
-			name: "Test: Simulate external delete",
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				if (!view.file) return;
-				const oldContent = editor.getValue();
-				const selection = editor.getSelection();
-				let newContent: string;
-				if (selection.length > 0) {
-					const from = editor.posToOffset(editor.getCursor("from"));
-					const to = editor.posToOffset(editor.getCursor("to"));
-					newContent = oldContent.slice(0, from) + oldContent.slice(to);
-				} else {
-					const lines = oldContent.split("\n");
-					lines.splice(editor.getCursor().line, 1);
-					newContent = lines.join("\n");
-				}
-				this.selfModifyPaths.add(view.file.path);
-				this.app.vault.modify(view.file, newContent);
-				this.handleExternalChange(view.file.path, oldContent, newContent);
-			},
 		});
 
 		this.addSettingTab(new ExternalDiffSettingTab(this.app, this));
@@ -483,37 +441,3 @@ class EditWarningModal extends Modal {
 	}
 }
 
-class TextInputModal extends Modal {
-	private prompt: string;
-	private onSubmit: (text: string) => void;
-
-	constructor(app: import("obsidian").App, prompt: string, onSubmit: (text: string) => void) {
-		super(app);
-		this.prompt = prompt;
-		this.onSubmit = onSubmit;
-	}
-
-	/** Render the modal with a text input and submit button. */
-	onOpen(): void {
-		let value = "";
-		new Setting(this.contentEl)
-			.setName(this.prompt)
-			.addText(text => {
-				text.setPlaceholder("Enter text…");
-				text.onChange(v => value = v);
-				text.inputEl.addEventListener("keydown", (e) => {
-					if (e.key === "Enter") {
-						this.close();
-						this.onSubmit(value);
-					}
-				});
-				// Auto-focus
-				setTimeout(() => text.inputEl.focus(), 10);
-			});
-		new Setting(this.contentEl)
-			.addButton(btn => btn.setButtonText("Insert").setCta().onClick(() => {
-				this.close();
-				this.onSubmit(value);
-			}));
-	}
-}

@@ -1,7 +1,7 @@
 # Requirements: Obsidian Diff Viewer
 
 **Defined:** 2026-03-03
-**Core Value:** When external tools modify vault files, the user can immediately see exactly what changed and selectively accept or reject each change — without leaving Obsidian.
+**Core Value:** When external tools modify vault files, the user can immediately see exactly what changed and selectively accept or reject each change -- without leaving Obsidian.
 
 ## v1 Requirements
 
@@ -21,6 +21,11 @@
 - [ ] **PERS-02**: Stale diffs are discarded on restore (file deleted or content no longer matches)
 - [ ] **PERS-03**: Accept/reject re-reads file before writing to detect changes since diff was generated
 
+### Detection
+
+- [ ] **DET-01**: CM6 transaction-based external change detection via `updateListener` + `userEvent` annotations, replacing debounce heuristics
+- [ ] **DET-02**: Remove FileWatcher.ts, pendingExternalPaths, recentlyEditedInternally, debounceMs, and editor-change listener
+
 ### Settings
 
 - [ ] **SETT-01**: Setting to toggle internal+external vs external-only change tracking
@@ -29,7 +34,7 @@
 
 ### Performance
 
-- [ ] **PERF-01**: Incremental re-render — adding/removing one file doesn't destroy other MergeViews
+- [ ] **PERF-01**: Incremental re-render -- adding/removing one file doesn't destroy other MergeViews
 - [ ] **PERF-02**: Use vault.read() instead of cachedRead() for initial snapshots
 
 ### Cleanup
@@ -68,6 +73,8 @@
 | PERS-01 | Phase 4 | Pending |
 | PERS-02 | Phase 4 | Pending |
 | PERS-03 | Phase 4 | Pending |
+| DET-01 | Phase 4 | Pending |
+| DET-02 | Phase 4 | Pending |
 | SETT-01 | Phase 2 | Pending |
 | SETT-02 | Phase 2 | Pending |
 | SETT-03 | Phase 2 | Pending |
@@ -76,10 +83,10 @@
 | CLEN-01 | Phase 5 | Pending |
 
 **Coverage:**
-- v1 requirements: 16 total
-- Mapped to phases: 16
+- v1 requirements: 18 total
+- Mapped to phases: 18
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-03*
-*Last updated: 2026-03-03 after roadmap creation*
+*Last updated: 2026-03-05 after Phase 4 planning (added DET-01, DET-02)*

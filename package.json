@@ -1,7 +1,7 @@
 {
-	"name": "obsidian-sample-plugin",
-	"version": "1.0.0",
-	"description": "This is a sample plugin for Obsidian (https://obsidian.md)",
+	"name": "obsidian-drift",
+	"version": "0.1.0",
+	"description": "Detects external file changes and shows side-by-side diffs with per-chunk accept/reject",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {

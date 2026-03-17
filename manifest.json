@@ -1,9 +1,10 @@
 {
-	"id": "obsidian-diff-viewer",
-	"name": "External Diff Viewer",
-	"version": "1.0.0",
+	"id": "obsidian-drift",
+	"name": "Drift",
+	"version": "0.1.0",
 	"minAppVersion": "0.15.0",
 	"description": "Detects external file changes and shows side-by-side diffs with per-chunk accept/reject",
 	"author": "Ryan Brown",
+	"authorUrl": "https://github.com/ryanbbrown",
 	"isDesktopOnly": true
 }
