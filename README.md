@@ -19,11 +19,13 @@ An Obsidian plugin that detects when external tools modify your vault files and 
 
 ## Installation
 
-### From Community Plugins
+This plugin is currently awaiting approval in the Obsidian community plugin store. In the meantime, you can install it using one of these methods:
 
-1. Open **Settings → Community plugins → Browse**
-2. Search for **Drift**
-3. Click **Install**, then **Enable**
+### Using BRAT (recommended)
+
+1. Install [BRAT](https://github.com/TfTHacker/obsidian42-brat) from the community plugin store
+2. Open command palette → **BRAT: Add a beta plugin for testing**
+3. Enter `ryanbbrown/obsidian-drift`
 
 ### Manual
 
