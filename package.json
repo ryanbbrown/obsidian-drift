@@ -25,6 +25,8 @@
 	},
 	"dependencies": {
 		"@codemirror/merge": "^6.7.6",
+		"@codemirror/state": "^6.6.0",
+		"@codemirror/view": "^6.40.0",
 		"obsidian": "latest"
 	}
 }

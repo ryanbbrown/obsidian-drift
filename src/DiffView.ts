@@ -78,6 +78,11 @@ export class DiffView extends ItemView {
 		return "git-compare";
 	}
 
+	/** Check if the view has no file sections. */
+	isEmpty(): boolean {
+		return this.sections.size === 0;
+	}
+
 	/** Add or update a file's diff. */
 	addFile(path: string, diff: PendingDiff): void {
 		this.sections.set(path, {diff, expanded: true, mergeView: null, mergeContainer: null});
@@ -86,11 +91,12 @@ export class DiffView extends ItemView {
 
 	async onOpen(): Promise<void> {}
 
-	async onClose(): Promise<void> {
+	onClose(): Promise<void> {
 		for (const section of this.sections.values()) {
 			section.mergeView?.destroy();
 		}
 		this.sections.clear();
+		return Promise.resolve();
 	}
 
 	private render(): void {
@@ -218,7 +224,7 @@ export class DiffView extends ItemView {
 		const content = section.mergeView
 			? section.mergeView.b.state.doc.toString()
 			: section.diff.newContent;
-		section.diff.onAccept(content);
+		void section.diff.onAccept(content);
 		this.removeFile(path);
 	}
 
@@ -226,7 +232,7 @@ export class DiffView extends ItemView {
 	private handleReject(path: string): void {
 		const section = this.sections.get(path);
 		if (!section) return;
-		section.diff.onReject();
+		void section.diff.onReject();
 		this.removeFile(path);
 	}
 

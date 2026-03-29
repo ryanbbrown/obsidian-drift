@@ -23,7 +23,7 @@ export class ExternalDiffSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Enable external change detection")
-			.setDesc("Automatically detect when external tools modify markdown files")
+			.setDesc("Automatically detect when external tools modify Markdown files")
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.enabled)
 				.onChange(async (value) => {

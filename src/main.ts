@@ -15,6 +15,12 @@ interface PersistedData {
 	pendingDiffs?: PersistedDiffEntry[];
 }
 
+/** Extract the CM6 EditorView from a MarkdownView (internal Obsidian API). */
+function getCmEditor(mdView: MarkdownView): EditorView | undefined {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
+	return (mdView as any).editor?.cm as EditorView | undefined;
+}
+
 export default class ExternalDiffPlugin extends Plugin {
 	settings: ExternalDiffSettings;
 	private pendingDiffs = new Map<string, PendingDiff>();
@@ -59,38 +65,20 @@ export default class ExternalDiffPlugin extends Plugin {
 			name: "Toggle external change detection",
 			callback: () => {
 				this.settings.enabled = !this.settings.enabled;
-				this.saveSettings();
+				void this.saveSettings();
 			},
 		});
 
 		this.addCommand({
 			id: "open-diff-viewer",
 			name: "Open diff viewer",
-			callback: () => this.openDiffTab(),
+			callback: () => void this.openDiffTab(),
 		});
 
 		this.addSettingTab(new ExternalDiffSettingTab(this.app, this));
 
-		this.app.workspace.onLayoutReady(async () => {
-			// Snapshot all markdown files as baselines
-			const files = this.app.vault.getMarkdownFiles();
-			await Promise.all(files.map(async (file) => {
-				this.baselines.set(file.path, await this.app.vault.read(file));
-			}));
-			// Restore pending diffs after baselines are loaded
-			if (this.restoredDiffs.length > 0) {
-				await this.restorePendingDiffs(this.restoredDiffs);
-				this.restoredDiffs = [];
-				// Obsidian preserves workspace leaves across plugin reload, so the diff
-				// tab may already exist but be empty (new DiffView instance, no sections).
-				// Repopulate it with the restored diffs.
-				const existing = this.getExistingDiffView();
-				if (existing && (existing as any).sections.size === 0) {
-					for (const [path, diff] of this.pendingDiffs) {
-						existing.addFile(path, diff);
-					}
-				}
-			}
+		this.app.workspace.onLayoutReady(() => {
+			void this.initializeBaselinesAndRestore();
 		});
 	}
 
@@ -99,14 +87,14 @@ export default class ExternalDiffPlugin extends Plugin {
 			clearTimeout(this.saveTimer);
 			this.saveTimer = null;
 		}
-		this.saveData({
+		void this.saveData({
 			settings: this.settings,
 			pendingDiffs: this.serializePendingDiffs(),
 		});
 	}
 
 	async loadSettings() {
-		const data: PersistedData = (await this.loadData()) ?? {};
+		const data: PersistedData = ((await this.loadData()) as PersistedData | null) ?? {};
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, data.settings ?? {});
 		this.restoredDiffs = data.pendingDiffs ?? [];
 	}
@@ -116,6 +104,27 @@ export default class ExternalDiffPlugin extends Plugin {
 			settings: this.settings,
 			pendingDiffs: this.serializePendingDiffs(),
 		});
+	}
+
+	/** Initialize baselines and restore persisted diffs after layout is ready. */
+	private async initializeBaselinesAndRestore(): Promise<void> {
+		const files = this.app.vault.getMarkdownFiles();
+		await Promise.all(files.map(async (file) => {
+			this.baselines.set(file.path, await this.app.vault.read(file));
+		}));
+		if (this.restoredDiffs.length > 0) {
+			await this.restorePendingDiffs(this.restoredDiffs);
+			this.restoredDiffs = [];
+			// Obsidian preserves workspace leaves across plugin reload, so the diff
+			// tab may already exist but be empty (new DiffView instance, no sections).
+			// Repopulate it with the restored diffs.
+			const existing = this.getExistingDiffView();
+			if (existing && existing.isEmpty()) {
+				for (const [path, diff] of this.pendingDiffs) {
+					existing.addFile(path, diff);
+				}
+			}
+		}
 	}
 
 	/** Mark a path as being modified by the plugin itself (suppresses detection). */
@@ -135,9 +144,9 @@ export default class ExternalDiffPlugin extends Plugin {
 	/** Schedule a debounced save of state to disk. */
 	private persistState(): void {
 		if (this.saveTimer) return;
-		this.saveTimer = setTimeout(async () => {
+		this.saveTimer = setTimeout(() => {
 			this.saveTimer = null;
-			await this.saveData({
+			void this.saveData({
 				settings: this.settings,
 				pendingDiffs: this.serializePendingDiffs(),
 			});
@@ -148,9 +157,9 @@ export default class ExternalDiffPlugin extends Plugin {
 	private async restorePendingDiffs(entries: PersistedDiffEntry[]): Promise<void> {
 		for (const entry of entries) {
 			const file = this.app.vault.getAbstractFileByPath(entry.path);
-			if (!file) continue;
+			if (!(file instanceof TFile)) continue;
 
-			const currentContent = await this.app.vault.read(file as TFile);
+			const currentContent = await this.app.vault.read(file);
 			if (currentContent === entry.oldContent) continue;
 
 			const diff = this.makeDiffCallbacks(entry.path, entry.oldContent, currentContent);
@@ -226,7 +235,7 @@ export default class ExternalDiffPlugin extends Plugin {
 	private getPathForEditorView(view: EditorView): string | null {
 		for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
 			const mdView = leaf.view as MarkdownView;
-			if ((mdView as any).editor?.cm === view) {
+			if (getCmEditor(mdView) === view) {
 				return mdView.file?.path ?? null;
 			}
 		}
@@ -237,7 +246,7 @@ export default class ExternalDiffPlugin extends Plugin {
 	private getPathForEditorState(state: EditorState): string | null {
 		for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
 			const mdView = leaf.view as MarkdownView;
-			if ((mdView as any).editor?.cm?.state === state) {
+			if (getCmEditor(mdView)?.state === state) {
 				return mdView.file?.path ?? null;
 			}
 		}
@@ -291,7 +300,7 @@ export default class ExternalDiffPlugin extends Plugin {
 	private async openDiffTab(): Promise<DiffView> {
 		const existing = this.getExistingDiffView();
 		if (existing) {
-			this.app.workspace.revealLeaf(existing.leaf);
+			await this.app.workspace.revealLeaf(existing.leaf);
 			return existing;
 		}
 		const leaf = this.app.workspace.getLeaf("tab");
@@ -311,36 +320,36 @@ export default class ExternalDiffPlugin extends Plugin {
 			newContent,
 			onAccept: async (content: string) => {
 				const file = this.app.vault.getAbstractFileByPath(path);
-				if (file) {
-					const currentContent = await this.app.vault.read(file as TFile);
+				if (file instanceof TFile) {
+					const currentContent = await this.app.vault.read(file);
 					if (currentContent !== newContent) {
 						new ConflictModal(this.app, path, () => {
-							this.completeAccept(path, content, file as TFile);
+							this.completeAccept(path, content, file);
 						}).open();
 						return;
 					}
+					this.completeAccept(path, content, file);
 				}
-				this.completeAccept(path, content, file as TFile);
 			},
 			onReject: async () => {
 				const file = this.app.vault.getAbstractFileByPath(path);
-				if (file) {
-					const currentContent = await this.app.vault.read(file as TFile);
+				if (file instanceof TFile) {
+					const currentContent = await this.app.vault.read(file);
 					if (currentContent !== newContent) {
 						new ConflictModal(this.app, path, () => {
-							this.completeReject(path, oldContent, file as TFile);
+							this.completeReject(path, oldContent, file);
 						}).open();
 						return;
 					}
+					this.completeReject(path, oldContent, file);
 				}
-				this.completeReject(path, oldContent, file as TFile);
 			},
 			onWrite: (content: string) => {
 				this.baselines.set(path, content);
 				const file = this.app.vault.getAbstractFileByPath(path);
-				if (file) {
+				if (file instanceof TFile) {
 					this.selfModifyPaths.add(path);
-					this.app.vault.modify(file as any, content);
+					void this.app.vault.modify(file, content);
 				}
 				this.persistState();
 			},
@@ -352,7 +361,7 @@ export default class ExternalDiffPlugin extends Plugin {
 		this.pendingDiffs.delete(path);
 		this.baselines.set(path, content);
 		this.selfModifyPaths.add(path);
-		this.app.vault.modify(file, content);
+		void this.app.vault.modify(file, content);
 		this.persistState();
 	}
 
@@ -360,7 +369,7 @@ export default class ExternalDiffPlugin extends Plugin {
 	private completeReject(path: string, oldContent: string, file: TFile): void {
 		this.pendingDiffs.delete(path);
 		this.selfModifyPaths.add(path);
-		this.app.vault.modify(file, oldContent);
+		void this.app.vault.modify(file, oldContent);
 		this.baselines.set(path, oldContent);
 		this.persistState();
 	}
@@ -377,7 +386,7 @@ export default class ExternalDiffPlugin extends Plugin {
 			return;
 		}
 
-		this.openDiffTab().then(view => view.addFile(path, diff));
+		void this.openDiffTab().then(view => view.addFile(path, diff));
 	}
 }
 
