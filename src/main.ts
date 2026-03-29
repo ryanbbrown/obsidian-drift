@@ -17,8 +17,12 @@ interface PersistedData {
 
 /** Extract the CM6 EditorView from a MarkdownView (internal Obsidian API). */
 function getCmEditor(mdView: MarkdownView): EditorView | undefined {
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
-	return (mdView as any).editor?.cm as EditorView | undefined;
+	const editor: unknown = (mdView as unknown as Record<string, unknown>).editor;
+	if (editor && typeof editor === "object") {
+		const cm: unknown = (editor as Record<string, unknown>).cm;
+		if (cm instanceof EditorView) return cm;
+	}
+	return undefined;
 }
 
 export default class ExternalDiffPlugin extends Plugin {
