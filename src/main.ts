@@ -15,6 +15,9 @@ interface PersistedData {
 	pendingDiffs?: PersistedDiffEntry[];
 }
 
+/** How long an internal-write mark stays valid before the CM6 "set" it announces must have arrived. */
+const INTERNAL_WRITE_MARK_TTL_MS = 2000;
+
 /** Extract the CM6 EditorView from a MarkdownView (internal Obsidian API). */
 function getCmEditor(mdView: MarkdownView): EditorView | undefined {
 	const editor: unknown = (mdView as unknown as Record<string, unknown>).editor;
@@ -30,6 +33,7 @@ export default class ExternalDiffPlugin extends Plugin {
 	private pendingDiffs = new Map<string, PendingDiff>();
 	private baselines = new Map<string, string>();
 	private selfModifyPaths = new Set<string>();
+	private internalWritePaths = new Map<string, number>();
 	private pendingEditWarning = new Set<string>();
 	private restoredDiffs: PersistedDiffEntry[] = [];
 	private saveTimer: ReturnType<typeof activeWindow.setTimeout> | null = null;
@@ -42,8 +46,9 @@ export default class ExternalDiffPlugin extends Plugin {
 		// CM6 detection: register updateListener on all editors
 		this.registerEditorExtension(this.createDetectionExtension());
 
-		// Fallback: detect changes to files not open in any editor
-		this.registerEvent(this.app.vault.on("modify", this.handleModifyFallback));
+		// Classify Vault-API writes as internal; detect external changes to files
+		// not open in any editor (CM6 handles files that are open)
+		this.registerEvent(this.app.vault.on("modify", this.handleModify));
 
 		// Baseline housekeeping
 		this.registerEvent(this.app.vault.on("create", async (file) => {
@@ -136,6 +141,14 @@ export default class ExternalDiffPlugin extends Plugin {
 		this.selfModifyPaths.add(path);
 	}
 
+	/** Consume a pending internal-write mark for a path; true if one exists and is fresh. */
+	private consumeInternalWriteMark(path: string): boolean {
+		const markedAt = this.internalWritePaths.get(path);
+		if (markedAt === undefined) return false;
+		this.internalWritePaths.delete(path);
+		return Date.now() - markedAt < INTERNAL_WRITE_MARK_TTL_MS;
+	}
+
 	/** Serialize pending diffs to a persistable format. */
 	private serializePendingDiffs(): PersistedDiffEntry[] {
 		return Array.from(this.pendingDiffs.entries()).map(([path, diff]) => ({
@@ -223,6 +236,12 @@ export default class ExternalDiffPlugin extends Plugin {
 				);
 
 				if (isExternalSync) {
+					// A fresh mark means this "set" is Obsidian syncing an in-app
+					// API write into the editor, not an external change.
+					if (this.consumeInternalWriteMark(path)) {
+						this.baselines.set(path, update.state.doc.toString());
+						return;
+					}
 					const newContent = update.state.doc.toString();
 					const oldContent = this.baselines.get(path);
 					if (oldContent !== undefined && oldContent !== newContent) {
@@ -257,10 +276,39 @@ export default class ExternalDiffPlugin extends Plugin {
 		return null;
 	}
 
-	/** Fallback handler for vault.on('modify') — catches changes to files not open in any editor. */
-	private handleModifyFallback = async (file: TAbstractFile): Promise<void> => {
+	/** Handler for vault.on('modify') — classifies Vault-API writes as internal and catches external changes to files not open in any editor. */
+	private handleModify = async (file: TAbstractFile): Promise<void> => {
 		if (!(file instanceof TFile) || file.extension !== "md") return;
 		if (!this.settings.enabled) return;
+
+		// Writes through the Vault API (plugins, Bases property edits, Obsidian
+		// Sync) run with file.saving === true, and the modify event fires
+		// synchronously inside that write — so `saving` must be read before the
+		// first await. External changes arrive via the file watcher after the
+		// write completes, with saving === false. The flag is undocumented; if a
+		// future Obsidian drops it, these writes get flagged again (the old
+		// behavior) rather than external changes being missed.
+		if ((file as TFile & {saving?: boolean}).saving) {
+			if (this.isFileOpenInEditor(file.path)) {
+				// The editor is about to sync this write in with a "set"
+				// transaction; leave a mark for the CM6 listener to consume.
+				this.internalWritePaths.set(file.path, Date.now());
+			}
+			const isSelfWrite = this.selfModifyPaths.delete(file.path);
+			// A non-self internal write (sync merge, another plugin) builds on
+			// the on-disk content, implicitly accepting any pending external
+			// changes — same semantics as a user edit via EditWarningModal.
+			// Keeping the diff would let Reject restore a stale snapshot and
+			// erase this write. The plugin's own writes (accept/reject/revert)
+			// manage pendingDiffs themselves and must not resolve here.
+			if (!isSelfWrite && this.pendingDiffs.has(file.path)) {
+				this.pendingDiffs.delete(file.path);
+				this.getExistingDiffView()?.removeFile(file.path);
+				this.persistState();
+			}
+			this.baselines.set(file.path, await this.app.vault.cachedRead(file));
+			return;
+		}
 
 		// Skip if file is open in an editor (CM6 listener handles it)
 		if (this.isFileOpenInEditor(file.path)) return;

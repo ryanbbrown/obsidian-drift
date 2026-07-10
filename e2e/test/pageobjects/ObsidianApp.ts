@@ -105,6 +105,38 @@ class ObsidianApp {
     await browser.pause(1000);
   }
 
+  /** Changes a frontmatter field via Obsidian's FileManager API (as Bases and metadata plugins do). */
+  async processFrontMatterInApp(filePath: string, key: string, value: string) {
+    await browser.execute(async (path: string, k: string, v: string) => {
+      // @ts-expect-error 'app' exists in Obsidian
+      declare const app: App;
+      const file = app.vault.getAbstractFileByPath(path)!;
+      await app.fileManager.processFrontMatter(file, (fm: any) => { fm[k] = v; });
+    }, filePath, key, value);
+    await browser.pause(1000);
+  }
+
+  /** Modifies a file via vault.modify WITHOUT the self-modify mark, as a third-party plugin would. */
+  async modifyViaVaultApi(filePath: string, content: string) {
+    await browser.execute(async (path: string, text: string) => {
+      // @ts-expect-error 'app' exists in Obsidian
+      declare const app: App;
+      const file = app.vault.getAbstractFileByPath(path)!;
+      await app.vault.modify(file, text);
+    }, filePath, content);
+    await browser.pause(1000);
+  }
+
+  /** Creates a note via the vault API without opening it in an editor. */
+  async createNoteViaApi(filePath: string, content: string) {
+    await browser.execute(async (path: string, text: string) => {
+      // @ts-expect-error 'app' exists in Obsidian
+      declare const app: App;
+      await app.vault.create(path, text);
+    }, filePath, content);
+    await browser.pause(1000);
+  }
+
   /** Dispatches a CM6 transaction to replace content, simulating a user edit (triggers detection). */
   async editAsUser(filePath: string, newContent: string) {
     await browser.execute((path: string, text: string) => {
