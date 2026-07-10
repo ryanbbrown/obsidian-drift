@@ -1,7 +1,7 @@
 {
 	"id": "drift",
 	"name": "Drift",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"minAppVersion": "1.7.2",
 	"description": "Detects external file changes and shows side-by-side diffs with per-chunk accept/reject.",
 	"author": "Ryan Brown",
