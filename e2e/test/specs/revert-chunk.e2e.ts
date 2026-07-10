@@ -13,6 +13,7 @@ describe("Per-chunk revert", () => {
     modified[7] = "THETA";   // chunk 2: line 8 changed
     await ObsidianApp.modifyFileExternally(filePath, modified.join("\n"));
     await ObsidianApp.waitForDiffTab();
+    await ObsidianApp.focusDiffTab();
 
     // Find revert buttons (one per chunk)
     const revertBtns = await $$(".diff-view-revert-btn");

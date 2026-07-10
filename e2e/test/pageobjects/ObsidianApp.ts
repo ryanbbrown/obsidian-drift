@@ -160,6 +160,17 @@ class ObsidianApp {
     await fs.writeFile(fullPath, content, "utf-8");
   }
 
+  /** Reveals and focuses the diff tab — its DOM is hidden while it sits in a background tab, so WebDriver can't click it. */
+  async focusDiffTab() {
+    await browser.execute(async () => {
+      // @ts-expect-error 'app' exists in Obsidian
+      declare const app: App;
+      const leaves = app.workspace.getLeavesOfType("external-diff-view");
+      if (leaves.length) await app.workspace.revealLeaf(leaves[0]!);
+    });
+    await browser.pause(300);
+  }
+
   /** Executes the "open diff viewer" command. */
   async openDiffViewer() {
     await browser.execute(() => {
@@ -187,8 +198,18 @@ class ObsidianApp {
     );
   }
 
+  /** Waits until at least `count` diff sections have rendered (the container can appear before its sections). */
+  private async waitForSectionIndex(sectionIndex: number) {
+    await browser.waitUntil(
+      async () => (await this.getDiffSections()).length > sectionIndex,
+      { timeout: 5000, timeoutMsg: `Diff section ${sectionIndex} never rendered` }
+    );
+  }
+
   /** Clicks the Accept button for a given diff section index. */
   async clickAccept(sectionIndex: number) {
+    await this.focusDiffTab();
+    await this.waitForSectionIndex(sectionIndex);
     const sections = await this.getDiffSections();
     const btn = await sections[sectionIndex]!.$(".diff-view-btn-accept");
     await btn.scrollIntoView();
@@ -197,6 +218,8 @@ class ObsidianApp {
 
   /** Clicks the Reject button for a given diff section index. */
   async clickReject(sectionIndex: number) {
+    await this.focusDiffTab();
+    await this.waitForSectionIndex(sectionIndex);
     const sections = await this.getDiffSections();
     const btn = await sections[sectionIndex]!.$(".diff-view-btn-reject");
     await btn.scrollIntoView();

@@ -14,6 +14,7 @@ describe("Diff display", () => {
     modified[19] = "CHANGED line 20";
     await ObsidianApp.modifyFileExternally(filePath, modified.join("\n"));
     await ObsidianApp.waitForDiffTab();
+    await ObsidianApp.focusDiffTab();
 
     // Verify folded regions exist in BOTH editors (collapsed state)
     const foldedBeforeA = await $$(".cm-merge-a .diff-view-fold-widget:not(.diff-view-fold-expanded)");

@@ -11,6 +11,7 @@ describe("Per-chunk revert", () => {
     modified[7] = "THETA";
     await ObsidianApp.modifyFileExternally(filePath, modified.join("\n"));
     await ObsidianApp.waitForDiffTab();
+    await ObsidianApp.focusDiffTab();
 
     // Revert all chunks one by one (re-query after each since MergeView re-renders)
     let btn = (await $$(".diff-view-revert-btn"))[0];

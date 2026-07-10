@@ -19,3 +19,11 @@ Obsidian plugins maintain state across the session. A diff tab or pending diff f
 ## 4. Scroll elements into view before clicking
 
 Obsidian tab content can overflow. Always call `scrollIntoView()` on buttons/elements before clicking them, or WebDriver will fail with "element not interactable".
+
+## 5. Focus the diff tab before clicking inside it
+
+The plugin opens the diff tab in the background (`active: false`), and Obsidian hides inactive tab DOM — so WebDriver refuses native clicks on diff-view elements with "element not interactable" even after scrolling. The `Browser.getWindowForTarget` warnings in the log are a red herring (wdio falls back to Web API scrolling). Call `ObsidianApp.focusDiffTab()` before interacting with anything inside the diff view. Also wait for the specific section to exist first: the container can render before its sections.
+
+## 6. Plugin reload leaves deferred views behind
+
+After `disablePlugin()` + `enablePlugin()`, Obsidian preserves the diff leaf but as a deferred placeholder — `leaf.view` is NOT the plugin's view class until the leaf is revealed or explicitly loaded. Any `leaf.view as DiffView` cast silently gets the placeholder. Product code must `instanceof`-check the view and use `await leaf.loadIfDeferred()` before touching it.
