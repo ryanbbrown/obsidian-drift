@@ -120,9 +120,9 @@ export default class ExternalDiffPlugin extends Plugin {
 			await this.restorePendingDiffs(this.restoredDiffs);
 			this.restoredDiffs = [];
 			// Obsidian preserves workspace leaves across plugin reload, so the diff
-			// tab may already exist but be empty (new DiffView instance, no sections).
-			// Repopulate it with the restored diffs.
-			const existing = this.getExistingDiffView();
+			// tab may already exist but be empty (deferred or new DiffView instance,
+			// no sections). Repopulate it with the restored diffs.
+			const existing = await this.resolveDiffView();
 			if (existing && existing.isEmpty()) {
 				for (const [path, diff] of this.pendingDiffs) {
 					existing.addFile(path, diff);
@@ -294,15 +294,25 @@ export default class ExternalDiffPlugin extends Plugin {
 		return false;
 	}
 
-	/** Find the existing diff view, or null if none open. */
+	/** Find the existing diff view, or null if none open or not yet loaded (deferred). */
 	private getExistingDiffView(): DiffView | null {
 		const leaves = this.app.workspace.getLeavesOfType(DIFF_VIEW_TYPE);
-		return leaves.length > 0 ? (leaves[0]!.view as DiffView) : null;
+		const view = leaves.length > 0 ? leaves[0]!.view : null;
+		return view instanceof DiffView ? view : null;
+	}
+
+	/** Find the existing diff view, loading it first if Obsidian deferred it (preserved leaf after plugin reload or app restart). */
+	private async resolveDiffView(): Promise<DiffView | null> {
+		const leaves = this.app.workspace.getLeavesOfType(DIFF_VIEW_TYPE);
+		if (leaves.length === 0) return null;
+		const leaf = leaves[0]!;
+		await leaf.loadIfDeferred();
+		return leaf.view instanceof DiffView ? leaf.view : null;
 	}
 
 	/** Open and focus the diff tab (for manual command). */
 	private async openDiffTab(): Promise<DiffView> {
-		const existing = this.getExistingDiffView();
+		const existing = await this.resolveDiffView();
 		if (existing) {
 			await this.app.workspace.revealLeaf(existing.leaf);
 			return existing;
@@ -318,7 +328,7 @@ export default class ExternalDiffPlugin extends Plugin {
 
 	/** Ensure the diff tab exists in the background without stealing focus. */
 	private async ensureDiffTab(): Promise<DiffView> {
-		const existing = this.getExistingDiffView();
+		const existing = await this.resolveDiffView();
 		if (existing) return existing;
 		const previousLeaf = this.app.workspace.getMostRecentLeaf();
 		const leaf = this.app.workspace.getLeaf("tab");
