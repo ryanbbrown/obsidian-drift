@@ -3,10 +3,12 @@ import type ExternalDiffPlugin from "./main";
 
 export interface ExternalDiffSettings {
 	enabled: boolean;
+	focusDiffOnChange: boolean;
 }
 
 export const DEFAULT_SETTINGS: ExternalDiffSettings = {
 	enabled: true,
+	focusDiffOnChange: false,
 };
 
 export class ExternalDiffSettingTab extends PluginSettingTab {
@@ -28,6 +30,16 @@ export class ExternalDiffSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.enabled)
 				.onChange(async (value) => {
 					this.plugin.settings.enabled = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName("Focus diff tab on external change")
+			.setDesc("Switch to the diff tab whenever an external change is detected")
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.focusDiffOnChange)
+				.onChange(async (value) => {
+					this.plugin.settings.focusDiffOnChange = value;
 					await this.plugin.saveSettings();
 				}));
 	}

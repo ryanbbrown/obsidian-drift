@@ -438,11 +438,16 @@ export default class ExternalDiffPlugin extends Plugin {
 		this.persistState();
 	}
 
-	/** Handle an external file change — add to the single diff tab, opening it only if needed. */
+	/** Handle an external file change, optionally focusing the diff tab. */
 	private handleExternalChange(path: string, oldContent: string, newContent: string): void {
 		const diff = this.makeDiffCallbacks(path, oldContent, newContent);
 		this.pendingDiffs.set(path, diff);
 		this.persistState();
+
+		if (this.settings.focusDiffOnChange) {
+			void this.openDiffTab().then(view => view.addFile(path, diff));
+			return;
+		}
 
 		const existing = this.getExistingDiffView();
 		if (existing) {

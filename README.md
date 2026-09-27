@@ -24,6 +24,15 @@ Install Drift from the [Obsidian community plugin directory](https://community.o
 3. Copy the downloaded files into that folder
 4. Restart Obsidian and enable the plugin in **Settings → Community plugins**
 
+### Build and test locally
+
+1. Run `npm ci` in the repository to install the locked dependencies.
+2. Run `npm run build` to type-check and generate `main.js`.
+3. Copy `main.js`, `manifest.json`, and `styles.css` into your test vault's `.obsidian/plugins/drift/` folder.
+4. Disable and re-enable Drift in **Settings → Community plugins** to load the new build.
+
+Repeat steps 2–4 after each change. `npm run dev` rebuilds automatically when source files change; you still need to copy the files and reload the plugin. Generated `main.js` is excluded from Git.
+
 ## Usage
 
 Once enabled, the plugin runs automatically. When an external tool modifies a markdown file in your vault:
@@ -32,6 +41,8 @@ Once enabled, the plugin runs automatically. When an external tool modifies a ma
 2. Use **Accept All** to keep the new content, or **Reject All** to revert to the original
 3. Use the **revert button** on individual chunks to selectively undo specific changes
 4. Use the **Open diff viewer** command to reopen the tab if you close it
+
+In **Settings → Drift**, enable **Focus diff tab on external change** to switch to the diff tab automatically whenever an external change is detected. This is off by default, so changes open in the background unless you opt in.
 
 ## Commands
 
