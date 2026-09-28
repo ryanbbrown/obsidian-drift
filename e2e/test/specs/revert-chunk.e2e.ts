@@ -24,10 +24,18 @@ describe("Per-chunk revert", () => {
     await revertBtns[0]!.click();
     await browser.pause(2000);
 
-    // Revert should write to disk immediately (no accept needed)
+    // Restore only changes the result draft until Accept is selected.
     const expected = [...original];
     expected[7] = "THETA"; // chunk 2 still has the external change
-    const contentAfterRevert = await ObsidianApp.readFileFromVault(filePath);
-    expect(contentAfterRevert).toBe(expected.join("\n"));
+    expect((await ObsidianApp.getMergeViewContent())?.b).toBe(expected.join("\n"));
+    expect(await ObsidianApp.readFileFromVault(filePath)).toBe(modified.join("\n"));
+
+    await $(".diff-view-history-actions [aria-label='Undo']").click();
+    expect((await ObsidianApp.getMergeViewContent())?.b).toBe(modified.join("\n"));
+    await $(".diff-view-history-actions [aria-label='Redo']").click();
+    expect((await ObsidianApp.getMergeViewContent())?.b).toBe(expected.join("\n"));
+
+    await ObsidianApp.clickAccept(0);
+    await browser.waitUntil(async () => (await ObsidianApp.readFileFromVault(filePath)) === expected.join("\n"));
   });
 });

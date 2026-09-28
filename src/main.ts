@@ -1,14 +1,9 @@
-import {App, MarkdownView, Modal, Plugin, Setting, TAbstractFile, TFile} from "obsidian";
+import {App, MarkdownView, Modal, Notice, Plugin, Setting, TAbstractFile, TFile} from "obsidian";
 import {EditorView, ViewUpdate} from "@codemirror/view";
 import {EditorState, Transaction, Extension} from "@codemirror/state";
 import {DEFAULT_SETTINGS, ExternalDiffSettings, ExternalDiffSettingTab} from "./settings";
 import {DiffView, DIFF_VIEW_TYPE, PendingDiff} from "./DiffView";
-
-interface PersistedDiffEntry {
-	path: string;
-	oldContent: string;
-	newContent: string;
-}
+import {PersistedDiffEntry, restoreReview, ReviewConflictError, writeReviewedContent} from "./reviewDraft";
 
 interface PersistedData {
 	settings?: Partial<ExternalDiffSettings>;
@@ -37,11 +32,12 @@ export default class ExternalDiffPlugin extends Plugin {
 	private pendingEditWarning = new Set<string>();
 	private restoredDiffs: PersistedDiffEntry[] = [];
 	private saveTimer: ReturnType<typeof activeWindow.setTimeout> | null = null;
+	private applying = new Set<string>();
 
 	async onload() {
 		await this.loadSettings();
 
-		this.registerView(DIFF_VIEW_TYPE, (leaf) => new DiffView(leaf));
+		this.registerView(DIFF_VIEW_TYPE, (leaf) => new DiffView(leaf, this.settings));
 
 		// CM6 detection: register updateListener on all editors
 		this.registerEditorExtension(this.createDetectionExtension());
@@ -109,6 +105,9 @@ export default class ExternalDiffPlugin extends Plugin {
 	}
 
 	async saveSettings() {
+		for (const leaf of this.app.workspace.getLeavesOfType(DIFF_VIEW_TYPE)) {
+			if (leaf.view instanceof DiffView) leaf.view.updateSettings();
+		}
 		await this.saveData({
 			settings: this.settings,
 			pendingDiffs: this.serializePendingDiffs(),
@@ -155,6 +154,7 @@ export default class ExternalDiffPlugin extends Plugin {
 			path,
 			oldContent: diff.oldContent,
 			newContent: diff.newContent,
+			draftContent: diff.draftContent,
 		}));
 	}
 
@@ -167,7 +167,7 @@ export default class ExternalDiffPlugin extends Plugin {
 				settings: this.settings,
 				pendingDiffs: this.serializePendingDiffs(),
 			});
-		}, 5000);
+		}, 500);
 	}
 
 	/** Restore pending diffs from persisted data, discarding stale entries. */
@@ -177,9 +177,9 @@ export default class ExternalDiffPlugin extends Plugin {
 			if (!(file instanceof TFile)) continue;
 
 			const currentContent = await this.app.vault.read(file);
-			if (currentContent === entry.oldContent) continue;
-
-			const diff = this.makeDiffCallbacks(entry.path, entry.oldContent, currentContent);
+			const snapshot = restoreReview(entry, currentContent);
+			if (!snapshot) continue;
+			const diff = Object.assign(this.makeDiffCallbacks(entry.path, snapshot.oldContent, snapshot.newContent), snapshot);
 			this.pendingDiffs.set(entry.path, diff);
 		}
 
@@ -244,7 +244,7 @@ export default class ExternalDiffPlugin extends Plugin {
 					}
 					const newContent = update.state.doc.toString();
 					const oldContent = this.baselines.get(path);
-					if (oldContent !== undefined && oldContent !== newContent) {
+					if (oldContent !== undefined && (oldContent !== newContent || this.pendingDiffs.has(path))) {
 						this.handleExternalChange(path, oldContent, newContent);
 					}
 				} else {
@@ -295,16 +295,19 @@ export default class ExternalDiffPlugin extends Plugin {
 				this.internalWritePaths.set(file.path, Date.now());
 			}
 			const isSelfWrite = this.selfModifyPaths.delete(file.path);
-			// A non-self internal write (sync merge, another plugin) builds on
-			// the on-disk content, implicitly accepting any pending external
-			// changes — same semantics as a user edit via EditWarningModal.
-			// Keeping the diff would let Reject restore a stale snapshot and
-			// erase this write. The plugin's own writes (accept/reject/revert)
-			// manage pendingDiffs themselves and must not resolve here.
+			// In-app writes resolve untouched reviews, but edited drafts must
+			// survive and be checked against the new disk version. The plugin's
+			// own accept/reject writes manage pendingDiffs themselves.
 			if (!isSelfWrite && this.pendingDiffs.has(file.path)) {
-				this.pendingDiffs.delete(file.path);
-				this.getExistingDiffView()?.removeFile(file.path);
-				this.persistState();
+				const pending = this.pendingDiffs.get(file.path)!;
+				if (pending.draftContent !== pending.newContent || pending.conflicted) {
+					pending.conflicted = true;
+					this.getExistingDiffView()?.updateReviewStatus(file.path);
+				} else {
+					this.pendingDiffs.delete(file.path);
+					this.getExistingDiffView()?.removeFile(file.path);
+					this.persistState();
+				}
 			}
 			this.baselines.set(file.path, await this.app.vault.cachedRead(file));
 			return;
@@ -321,7 +324,7 @@ export default class ExternalDiffPlugin extends Plugin {
 			return;
 		}
 
-		if (oldContent === newContent) return;
+		if (oldContent === newContent && !this.pendingDiffs.has(file.path)) return;
 
 		// Check self-modify
 		if (this.selfModifyPaths.has(file.path)) {
@@ -393,54 +396,90 @@ export default class ExternalDiffPlugin extends Plugin {
 
 	/** Create callbacks for a pending diff and store them. */
 	private makeDiffCallbacks(path: string, oldContent: string, newContent: string): PendingDiff {
-		return {
+		const diff: PendingDiff = {
 			oldContent,
 			newContent,
-			onAccept: (content: string) => {
-				const file = this.app.vault.getAbstractFileByPath(path);
-				if (file instanceof TFile) {
-					this.completeAccept(path, content, file);
-				}
-			},
-			onReject: () => {
-				const file = this.app.vault.getAbstractFileByPath(path);
-				if (file instanceof TFile) {
-					this.completeReject(path, oldContent, file);
-				}
-			},
-			onWrite: (content: string) => {
-				this.baselines.set(path, content);
-				const file = this.app.vault.getAbstractFileByPath(path);
-				if (file instanceof TFile) {
-					this.selfModifyPaths.add(path);
-					void this.app.vault.modify(file, content);
-				}
+			draftContent: newContent,
+			conflicted: false,
+			onAccept: content => this.completeReview(path, diff, content),
+			onReject: () => this.completeReview(path, diff, diff.oldContent),
+			onDraftChange: content => {
+				diff.draftContent = content;
 				this.persistState();
 			},
+			onReviewLatest: () => this.reviewLatest(path, diff),
 		};
+		return diff;
 	}
 
-	/** Complete the accept action after conflict check. */
-	private completeAccept(path: string, content: string, file: TFile): void {
-		this.pendingDiffs.delete(path);
-		this.baselines.set(path, content);
-		this.selfModifyPaths.add(path);
-		void this.app.vault.modify(file, content);
-		this.persistState();
+	/** Apply only to the version reviewed, leaving failed/conflicting drafts open. */
+	private async completeReview(path: string, diff: PendingDiff, content: string): Promise<boolean> {
+		if (this.pendingDiffs.get(path) !== diff || this.applying.has(path)) return false;
+		if (diff.conflicted) {
+			new Notice("Review the latest file changes before applying this draft.");
+			return false;
+		}
+		const file = this.app.vault.getAbstractFileByPath(path);
+		if (!(file instanceof TFile)) {
+			new Notice("The file is no longer available. Your review has not been applied.");
+			return false;
+		}
+		this.applying.add(path);
+		try {
+			await writeReviewedContent(this.app.vault, file, diff.newContent, content, () => {
+				if (this.pendingDiffs.get(path) !== diff) throw new ReviewConflictError();
+				this.selfModifyPaths.add(path);
+			});
+			if (this.pendingDiffs.get(path) === diff) this.pendingDiffs.delete(path);
+			this.baselines.set(path, content);
+			this.persistState();
+			return true;
+		} catch (error) {
+			this.selfModifyPaths.delete(path);
+			if (error instanceof ReviewConflictError) {
+				diff.conflicted = true;
+				this.getExistingDiffView()?.updateReviewStatus(path);
+				new Notice("The file changed again. Review the latest changes before applying your draft.");
+			} else {
+				console.error("Drift: could not apply review", error);
+				new Notice("Could not save the file. Your draft is still available.");
+			}
+			return false;
+		} finally {
+			this.applying.delete(path);
+		}
 	}
 
-	/** Complete the reject action after conflict check. */
-	private completeReject(path: string, oldContent: string, file: TFile): void {
-		this.pendingDiffs.delete(path);
-		this.selfModifyPaths.add(path);
-		void this.app.vault.modify(file, oldContent);
-		this.baselines.set(path, oldContent);
-		this.persistState();
+	/** Compare the preserved draft against the latest disk version, without writing. */
+	private async reviewLatest(path: string, previous: PendingDiff): Promise<void> {
+		if (this.pendingDiffs.get(path) !== previous || this.applying.has(path)) return;
+		const file = this.app.vault.getAbstractFileByPath(path);
+		if (!(file instanceof TFile)) return;
+		try {
+			const current = await this.app.vault.read(file);
+			if (this.pendingDiffs.get(path) !== previous) return;
+			const diff = this.makeDiffCallbacks(path, current, current);
+			diff.draftContent = previous.draftContent;
+			this.pendingDiffs.set(path, diff);
+			this.getExistingDiffView()?.addFile(path, diff);
+			this.persistState();
+		} catch (error) {
+			console.error("Drift: could not read latest version", error);
+			new Notice("Could not read the latest version. Your draft is still available.");
+		}
 	}
 
 	/** Handle an external file change — add to the single diff tab, opening it only if needed. */
 	private handleExternalChange(path: string, oldContent: string, newContent: string): void {
-		const diff = this.makeDiffCallbacks(path, oldContent, newContent);
+		const previous = this.pendingDiffs.get(path);
+		if (previous && (previous.draftContent !== previous.newContent || previous.conflicted)) {
+			previous.conflicted = previous.newContent !== newContent;
+			this.getExistingDiffView()?.updateReviewStatus(path);
+			this.persistState();
+			return;
+		}
+		if (previous?.newContent === newContent) return;
+		const diff = this.makeDiffCallbacks(path, previous?.oldContent ?? oldContent, newContent);
 		this.pendingDiffs.set(path, diff);
 		this.persistState();
 
@@ -470,7 +509,7 @@ class EditWarningModal extends Modal {
 		this.modalEl.addClass("diff-edit-warning-modal");
 		this.contentEl.createEl("h3", {text: "Pending external changes"});
 		this.contentEl.createEl("p", {
-			text: "Editing this file will accept all pending external changes. They will no longer be visible in the diff viewer.",
+			text: "Editing this file will accept its current disk contents and discard any review draft. Pending changes will no longer be visible in the diff viewer.",
 		});
 		new Setting(this.contentEl)
 			.addButton(btn => btn.setButtonText("Proceed").setCta().onClick(() => {

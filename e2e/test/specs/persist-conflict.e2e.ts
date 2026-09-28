@@ -1,7 +1,7 @@
 import ObsidianApp from "../pageobjects/ObsidianApp";
 
 describe("Persistence", () => {
-  it("should apply the diff's content when accepting after an internal edit", async () => {
+  it("should preserve newer disk content until the latest version is reviewed", async () => {
     await ObsidianApp.createNewNote("Conflict test original");
     const filePath = await ObsidianApp.getActiveFilePath();
 
@@ -12,17 +12,21 @@ describe("Persistence", () => {
     // the old external change while the file on disk has moved on)
     await ObsidianApp.editFileInternally(filePath, "Conflict test - sneaky edit");
 
-    // Accept applies the diff's newContent — last write wins. ConflictModal was
-    // removed (47641ea) in favor of the editor-level warning for user edits.
+    // Accept must not overwrite a disk version the user has not reviewed.
     await ObsidianApp.clickAccept(0);
     await browser.pause(2000);
 
-    // Diff should be resolved
+    // The draft remains available and the file stays untouched.
     const containers = await $$(".diff-view-container");
-    expect(containers.length).toBe(0);
+    expect(containers.length).toBe(1);
 
-    // Disk content is what the diff showed, not the sneaky edit
     const content = await ObsidianApp.readFileFromVault(filePath);
-    expect(content).toBe("Conflict test - external");
+    expect(content).toBe("Conflict test - sneaky edit");
+
+    await $(".diff-view-review-status button").click();
+    await browser.waitUntil(async () => (await ObsidianApp.getMergeViewContent())?.a === "Conflict test - sneaky edit");
+    expect((await ObsidianApp.getMergeViewContent())?.b).toBe("Conflict test - external");
+    await ObsidianApp.clickAccept(0);
+    await browser.waitUntil(async () => (await ObsidianApp.readFileFromVault(filePath)) === "Conflict test - external");
   });
 });

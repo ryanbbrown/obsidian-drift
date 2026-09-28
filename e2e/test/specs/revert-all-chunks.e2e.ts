@@ -1,7 +1,7 @@
 import ObsidianApp from "../pageobjects/ObsidianApp";
 
 describe("Per-chunk revert", () => {
-  it("should close diff section when all chunks are reverted", async () => {
+  it("should keep fully reverted drafts open until accepted", async () => {
     const original = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"];
     await ObsidianApp.createNewNote(original.join("\n"));
     const filePath = await ObsidianApp.getActiveFilePath();
@@ -23,9 +23,14 @@ describe("Per-chunk revert", () => {
     }
     await browser.pause(1000);
 
-    // Diff section should auto-close when all changes are reverted
+    // Keep the result available for undo or an explicit Accept.
     const containers = await $$(".diff-view-container");
-    expect(containers.length).toBe(0);
+    expect(containers.length).toBe(1);
+    expect((await ObsidianApp.getMergeViewContent())?.b).toBe(original.join("\n"));
+    expect(await ObsidianApp.readFileFromVault(filePath)).toBe(modified.join("\n"));
+
+    await ObsidianApp.clickAccept(0);
+    await browser.waitUntil(async () => (await ObsidianApp.readFileFromVault(filePath)) === original.join("\n"));
 
     // File should be back to original
     const content = await ObsidianApp.readFileFromVault(filePath);

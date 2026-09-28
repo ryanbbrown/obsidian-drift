@@ -11,15 +11,33 @@
 }
 
 .diff-view-toolbar {
-	display: flex;
-	justify-content: flex-end;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+	align-items: center;
+	flex-shrink: 0;
 	gap: 6px;
 	padding: 6px 12px;
 	border-bottom: 1px solid var(--background-modifier-border);
 }
 
+.diff-view-toolbar-navigation,
+.diff-view-toolbar-actions {
+	display: flex;
+	gap: 6px;
+}
+
+.diff-view-toolbar-navigation {
+	justify-self: start;
+	flex-wrap: wrap;
+}
+
+.diff-view-toolbar-actions {
+	grid-column: 2;
+}
+
 .diff-view-scroll {
 	flex: 1;
+	min-height: 0;
 	overflow-y: auto;
 }
 
@@ -102,6 +120,46 @@
 }
 
 /* Merge view area */
+.diff-view-review-labels {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	background: var(--background-secondary);
+	font-size: var(--font-ui-small);
+}
+
+.diff-view-original-label,
+.diff-view-result-label {
+	padding: 4px 10px;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.diff-view-history-actions {
+	display: flex;
+	gap: 4px;
+}
+
+.diff-view-review-status {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+	padding: 4px 10px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.diff-view-merge .cm-merge-b .cm-cursor {
+	border-left: 2px solid var(--text-normal);
+}
+
+.diff-view-merge .cm-merge-b.cm-focused {
+	outline: 1px solid var(--interactive-accent);
+	outline-offset: -1px;
+}
+
 .diff-view-merge {
 	border-top: 1px solid var(--background-modifier-border);
 }
@@ -109,6 +167,20 @@
 .diff-view-merge .cm-mergeView {
 	max-height: 60vh;
 	overflow: auto;
+}
+
+.diff-view-horizontal-scroll {
+	position: sticky;
+	bottom: 0;
+	z-index: 5;
+	height: 16px;
+	overflow-x: scroll;
+	overflow-y: hidden;
+	background: var(--background-primary);
+}
+
+.diff-view-horizontal-track {
+	height: 1px;
 }
 
 /* Diff highlight colors — vibrant base colors at moderate opacity */
@@ -126,6 +198,17 @@
 
 .diff-view-merge .cm-changedText.cm-insertedText {
 	background-color: rgba(63, 185, 80, 0.5) !important;
+}
+
+/* Optional contrast for inline changes in the two-pane diff. */
+.diff-view-contrast .diff-view-merge .cm-merge-a .cm-changedText {
+	background-color: #9d2424 !important;
+	color: #fff !important;
+}
+
+.diff-view-contrast .diff-view-merge .cm-merge-b .cm-changedText {
+	background-color: #176b38 !important;
+	color: #fff !important;
 }
 
 /* Fold/unfold widgets for unchanged lines */
